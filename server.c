@@ -6,30 +6,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-
-const char *CRLF = "\r\n";
-const char *CRLFCRLF = "\r\n\r\n";
-const char *SP = " ";
-
-typedef struct string
-{
-	const char *data;
-	size_t len;
-} string;
-
-typedef struct split_string
-{
-	string *strings;
-	size_t len;
-} split_string;
-
-typedef struct request_line
-{
-	string method;
-	string path;
-	string version;
-	int ok;
-} request_line_view;
+#include <errno.h>
+#include "server.h"
 
 request_line_view get_req_line(split_string req_line)
 {
@@ -69,6 +47,54 @@ request_line_view get_req_line(split_string req_line)
 	result.version = version;
 	result.ok = 1;
 	return result;
+}
+
+string get_header(split_string list, string header)
+{
+
+	string result = {.data = NULL, .len = 0};
+	if (list.len < 2)
+		return result;
+	for (size_t i = 1; i < list.len; i++)
+	{
+		string target = list.strings[i];
+		char *p = memchr(target.data, ':', target.len);
+		size_t target_header_len = p - target.data;
+		if (!p)
+			continue;
+
+		if (target_header_len == header.len && memcmp(target.data, header.data, target_header_len) == 0)
+		{
+			size_t header_len = target.len - target_header_len - 1;
+			if (header_len < 1)
+				return result;
+			result.len = target.len - target_header_len - 2; // -2 for the space in between.
+			result.data = p + 2;														 // +2 to get over the space
+			return result;
+		}
+	}
+
+	return result;
+}
+
+enum Connection check_connection_header(split_string headers)
+{
+	string connection_string;
+	connection_string.data = "Connection";
+	connection_string.len = 10;
+
+	string result = get_header(headers, connection_string);
+
+	if (!result.data)
+	{
+		return KEEP_ALIVE;
+	}
+
+	if (result.len == strlen("keep-alive") && memcmp("keep-alive", result.data, result.len) == 0)
+	{
+		return KEEP_ALIVE;
+	}
+	return CLOSE;
 }
 
 split_string split_string_by(const char *s, size_t s_len, const char *split, size_t split_len)
@@ -175,7 +201,7 @@ int write_all(int fd, const void *buf, size_t len)
 	return 0;
 }
 
-int send_file_respond(int client_fd, const char *filepath)
+int send_file_respond(int client_fd, const char *filepath, enum Connection connection)
 {
 	int filepath_fd;
 	if ((filepath_fd = open(filepath, O_RDONLY)) < 0)
@@ -189,12 +215,13 @@ int send_file_respond(int client_fd, const char *filepath)
 		return 1;
 	}
 	char head[256];
+	char *connection_header = connection == KEEP_ALIVE ? "Connection: keep-alive\r\n" : "Connection: close\r\n";
+
 	int head_len = snprintf(head, 256, "HTTP/1.1 200 OK\r\n"
 																		 "Content-Type: text/html; charset=utf-8\r\n"
-																		 "Content-Length: %lld\r\n"
-																		 "Connection: close\r\n"
+																		 "Content-Length: %lld\r\n%s"
 																		 "\r\n",
-													(long long)st.st_size);
+													(long long)st.st_size, connection_header);
 	if (head_len < 0)
 	{
 		close(filepath_fd);
@@ -314,90 +341,138 @@ int send_404_respond(int client_fd)
 
 int handle_client(int client_socket)
 {
-	int max = 1024;
-	char read_buf[max];
-	size_t count = 0;
+	struct timeval tval = {.tv_sec = 5, .tv_usec = 0};
+	if (setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, &tval, sizeof(tval)) < 0)
+		return 1;
+
 	for (;;)
 	{
-		ssize_t sub_count = read(client_socket, &read_buf[count], sizeof(read_buf) - 1 - count);
-		if (sub_count < 0)
+		int max = 1024;
+		char read_buf[max];
+		size_t count = 0;
+		for (;;)
 		{
-			perror("read()");
-			close(client_socket);
-			return 1;
+			ssize_t sub_count = read(client_socket, &read_buf[count], sizeof(read_buf) - 1 - count);
+			if (sub_count < 0)
+			{
+				if (errno == EAGAIN || errno == EWOULDBLOCK)
+				{
+					printf("mitä vittua 1\n");
+					return 0;
+				}
+				perror("read()");
+				return 1;
+			}
+			if (sub_count == 0)
+			{
+				printf("mitä vittua 2\n");
+				return 0;
+			}
+			count += sub_count;
+			if (memmem(read_buf, count, CRLFCRLF, strlen(CRLFCRLF)) != NULL)
+			{
+				break;
+			}
 		}
-		if (sub_count == 0)
+
+		read_buf[count] = '\0';
+		split_string headers_and_requestline = split_string_by(read_buf, (size_t)count, CRLFCRLF, strlen(CRLFCRLF));
+		if (headers_and_requestline.len < 1)
 		{
-			break;
+			char *res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+			int n = write_all(client_socket, res, strlen(res));
+			free(headers_and_requestline.strings);
+			if (n)
+			{
+				return 1;
+			}
+			printf("mitä vittua 3\n");
+
+			return 0;
 		}
-		count += sub_count;
-		if (memmem(read_buf, count, CRLFCRLF, strlen(CRLFCRLF)) != NULL)
+
+		split_string result = split_string_by(headers_and_requestline.strings[0].data, headers_and_requestline.strings[0].len, CRLF, strlen(CRLF));
+
+		if (result.len < 1)
 		{
-			break;
+			char *res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+			int n = write_all(client_socket, res, strlen(res));
+
+			free(result.strings);
+			free(headers_and_requestline.strings);
+			if (n)
+			{
+				return 1;
+			}
+			printf("mitä vittua 4\n");
+
+			return 0;
 		}
-	}
+		string request_line = result.strings[0];
+		split_string split_req_line = split_string_by(request_line.data, request_line.len, SP, strlen(SP));
+		request_line_view req_line_view = get_req_line(split_req_line);
 
-	read_buf[count] = '\0';
+		if (!req_line_view.ok)
+		{
+			char *res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+			int n = write_all(client_socket, res, strlen(res));
 
-	split_string result = split_string_by(read_buf, (size_t)count, CRLF, strlen(CRLF));
-	printf("\n----------\n");
+			free(result.strings);
+			free(headers_and_requestline.strings);
+			if (n)
+			{
+				return 1;
+			}
+			printf("mitä vittua 5\n");
 
-	if (result.len < 1)
-	{
-		char *res = "HTTP/1.0 400  \r\n\r\n";
-		int n = write_all(client_socket, res, strlen(res));
+			return 0;
+		}
+		if (memcmp("GET", req_line_view.method.data, 3) != 0)
+		{
+			char *res = "HTTP/1.1 405 ONLY GET METHOD ALLOWED\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+			write_all(client_socket, res, strlen(res));
+			free(headers_and_requestline.strings);
+			free(split_req_line.strings);
+			free(result.strings);
+			printf("mitä vittua 6\n");
 
+			return 0;
+		}
+
+		char path[100];
+		if (build_route_path(req_line_view.path, path, 100) == 1)
+		{
+			char *res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+			int n = write_all(client_socket, res, strlen(res));
+			free(result.strings);
+			free(split_req_line.strings);
+			free(headers_and_requestline.strings);
+
+			if (n)
+			{
+				return 1;
+			}
+			printf("mitä vittua 7\n");
+
+			return 0;
+		}
+		enum Connection con = check_connection_header(result);
+
+		if (send_file_respond(client_socket, path, con))
+		{
+			send_404_respond(client_socket);
+			con = CLOSE;
+		}
+		free(headers_and_requestline.strings);
 		free(result.strings);
-		if (n)
-		{
-			return 1;
-		}
-		return 0;
-	}
-	string request_line = result.strings[0];
-	split_string split_req_line = split_string_by(request_line.data, request_line.len, SP, strlen(SP));
-	request_line_view req_line_view = get_req_line(split_req_line);
-
-	if (!req_line_view.ok)
-	{
-		char *res = "HTTP/1.0 400  \r\n\r\n";
-		int n = write_all(client_socket, res, strlen(res));
-
-		free(result.strings);
-		if (n)
-		{
-			return 1;
-		}
-		return 0;
-	}
-	if (memcmp("GET", req_line_view.method.data, 3) != 0)
-	{
-		char *res = "HTTP/1.0 405 ONLY GET METHOD ALLOWED\r\n\r\n";
-		write_all(client_socket, res, strlen(res));
-
 		free(split_req_line.strings);
-		free(result.strings);
-		return 0;
-	}
-
-	char path[100];
-	if (build_route_path(req_line_view.path, path, 100) == 1)
-	{
-		char *res = "HTTP/1.0 400  \r\n\r\n";
-		int n = write_all(client_socket, res, strlen(res));
-		free(result.strings);
-		if (n)
+		if (con == CLOSE)
 		{
-			return 1;
+			printf("mitä vittua 8\n");
+
+			return 0;
 		}
-		return 0;
 	}
-	if (send_file_respond(client_socket, path))
-	{
-		send_404_respond(client_socket);
-	}
-	free(result.strings);
-	return 0;
 }
 
 int main(void)
@@ -442,7 +517,8 @@ int main(void)
 	int count = 1;
 	while (1)
 	{
-		printf("here is the couunt: %d", count);
+		printf("\n↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓\n");
+		printf("count: %d\n", count);
 		count++;
 		printf("waiting for a connection...\n");
 		int client_socket = accept(tcp_socket, NULL, NULL);
@@ -460,6 +536,7 @@ int main(void)
 			return 1;
 		}
 		close(client_socket);
-		printf("accepted\n");
+		printf("client socket has closed\n");
+		printf("\n↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑\n");
 	}
 }
