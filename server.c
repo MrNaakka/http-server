@@ -250,6 +250,7 @@ int worstcase(int client_fd)
 	}
 	return 0;
 }
+
 int send_404_respond(int client_fd)
 {
 
@@ -345,7 +346,7 @@ int handle_client(int client_socket)
 	{
 		char *res = "HTTP/1.0 400  \r\n\r\n";
 		int n = write_all(client_socket, res, strlen(res));
-		close(client_socket);
+
 		free(result.strings);
 		if (n)
 		{
@@ -361,7 +362,7 @@ int handle_client(int client_socket)
 	{
 		char *res = "HTTP/1.0 400  \r\n\r\n";
 		int n = write_all(client_socket, res, strlen(res));
-		close(client_socket);
+
 		free(result.strings);
 		if (n)
 		{
@@ -372,8 +373,8 @@ int handle_client(int client_socket)
 	if (memcmp("GET", req_line_view.method.data, 3) != 0)
 	{
 		char *res = "HTTP/1.0 405 ONLY GET METHOD ALLOWED\r\n\r\n";
-		write(client_socket, res, strlen(res));
-		close(client_socket);
+		write_all(client_socket, res, strlen(res));
+
 		free(split_req_line.strings);
 		free(result.strings);
 		return 0;
@@ -384,7 +385,6 @@ int handle_client(int client_socket)
 	{
 		char *res = "HTTP/1.0 400  \r\n\r\n";
 		int n = write_all(client_socket, res, strlen(res));
-		close(client_socket);
 		free(result.strings);
 		if (n)
 		{
@@ -396,9 +396,6 @@ int handle_client(int client_socket)
 	{
 		send_404_respond(client_socket);
 	}
-	close(client_socket);
-	// char *res = "HTTP/1.0 200 OK\r\n\r\n<h1>HELLO WORLD</h1>pupustus";
-	// write(client_socket, res, strlen(res));
 	free(result.strings);
 	return 0;
 }
@@ -442,9 +439,11 @@ int main(void)
 		return 1;
 	}
 	printf("socket listening...\n");
+	int count = 1;
 	while (1)
 	{
-
+		printf("here is the couunt: %d", count);
+		count++;
 		printf("waiting for a connection...\n");
 		int client_socket = accept(tcp_socket, NULL, NULL);
 		if (client_socket < 0)
@@ -456,9 +455,11 @@ int main(void)
 
 		if (handle_client(client_socket) != 0)
 		{
+			close(client_socket);
 			close(tcp_socket);
 			return 1;
 		}
+		close(client_socket);
 		printf("accepted\n");
 	}
 }

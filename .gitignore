@@ -1,0 +1,28 @@
+# Compiled object files
+*.o
+*.obj
+
+# Compiled binaries
+*.out
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build directories
+/build
+/bin
+/target
+
+# Debug files
+*.log
+*.tmp
+*.pid
+
+# macOS-specific files
+.DS_Store
+
+# Editor / IDE files
+.vscode/
+.idea/
+*.swp
