@@ -7,7 +7,10 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <pthread.h>
 #include "server.h"
+
+#define THREAD_COUNT 32
 
 request_line_view get_req_line(split_string req_line)
 {
@@ -357,7 +360,6 @@ int handle_client(int client_socket)
 			{
 				if (errno == EAGAIN || errno == EWOULDBLOCK)
 				{
-					printf("mitä vittua 1\n");
 					return 0;
 				}
 				perror("read()");
@@ -365,7 +367,6 @@ int handle_client(int client_socket)
 			}
 			if (sub_count == 0)
 			{
-				printf("mitä vittua 2\n");
 				return 0;
 			}
 			count += sub_count;
@@ -377,6 +378,7 @@ int handle_client(int client_socket)
 
 		read_buf[count] = '\0';
 		split_string headers_and_requestline = split_string_by(read_buf, (size_t)count, CRLFCRLF, strlen(CRLFCRLF));
+		// print_split_string(headers_and_requestline);
 		if (headers_and_requestline.len < 1)
 		{
 			char *res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -386,9 +388,7 @@ int handle_client(int client_socket)
 			{
 				return 1;
 			}
-			printf("mitä vittua 3\n");
-
-			return 0;
+			continue;
 		}
 
 		split_string result = split_string_by(headers_and_requestline.strings[0].data, headers_and_requestline.strings[0].len, CRLF, strlen(CRLF));
@@ -404,9 +404,7 @@ int handle_client(int client_socket)
 			{
 				return 1;
 			}
-			printf("mitä vittua 4\n");
-
-			return 0;
+			continue;
 		}
 		string request_line = result.strings[0];
 		split_string split_req_line = split_string_by(request_line.data, request_line.len, SP, strlen(SP));
@@ -414,7 +412,7 @@ int handle_client(int client_socket)
 
 		if (!req_line_view.ok)
 		{
-			char *res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+			char *res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
 			int n = write_all(client_socket, res, strlen(res));
 
 			free(result.strings);
@@ -423,26 +421,26 @@ int handle_client(int client_socket)
 			{
 				return 1;
 			}
-			printf("mitä vittua 5\n");
-
-			return 0;
+			continue;
 		}
 		if (memcmp("GET", req_line_view.method.data, 3) != 0)
 		{
-			char *res = "HTTP/1.1 405 ONLY GET METHOD ALLOWED\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-			write_all(client_socket, res, strlen(res));
+			char *res = "HTTP/1.1 405 ONLY GET METHOD ALLOWED\r\nContent-Length: 0\r\n\r\n";
+			int n = write_all(client_socket, res, strlen(res));
 			free(headers_and_requestline.strings);
 			free(split_req_line.strings);
 			free(result.strings);
-			printf("mitä vittua 6\n");
-
-			return 0;
+			if (n)
+			{
+				return 1;
+			}
+			continue;
 		}
 
 		char path[100];
 		if (build_route_path(req_line_view.path, path, 100) == 1)
 		{
-			char *res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+			char *res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
 			int n = write_all(client_socket, res, strlen(res));
 			free(result.strings);
 			free(split_req_line.strings);
@@ -452,9 +450,7 @@ int handle_client(int client_socket)
 			{
 				return 1;
 			}
-			printf("mitä vittua 7\n");
-
-			return 0;
+			continue;
 		}
 		enum Connection con = check_connection_header(result);
 
@@ -468,16 +464,106 @@ int handle_client(int client_socket)
 		free(split_req_line.strings);
 		if (con == CLOSE)
 		{
-			printf("mitä vittua 8\n");
-
 			return 0;
 		}
 	}
 }
 
-int main(void)
+typedef struct tpool_work
+{
+	int client_socket;
+	struct tpool_work *next;
+} tpool_work;
+
+typedef struct thread_pool
+{
+	size_t count;
+	pthread_t *threads;
+
+	tpool_work *first;
+	tpool_work *last;
+
+	pthread_mutex_t mtx;
+	pthread_cond_t has_job;
+
+	int isExit;
+} thread_pool;
+
+int que_list_push(thread_pool *tp, int new_client_socket)
+{
+	tpool_work *new_work_p = calloc(1, sizeof(tpool_work));
+	if (!new_work_p)
+	{
+		return 1;
+	}
+	new_work_p->client_socket = new_client_socket;
+	new_work_p->next = NULL;
+
+	if (tp->first == NULL && tp->last == NULL)
+	{
+		tp->first = new_work_p;
+		tp->last = new_work_p;
+		return 0;
+	}
+	tp->last->next = new_work_p;
+	tp->last = new_work_p;
+	return 0;
+}
+void que_list_pop(thread_pool *tp, int *out_fd)
+{
+	if (tp->first == NULL)
+	{
+		return;
+	}
+	*out_fd = tp->first->client_socket;
+	if (tp->first == tp->last)
+	{
+
+		free(tp->first);
+		tp->first = NULL;
+		tp->last = NULL;
+		return;
+	}
+	tpool_work *second = tp->first->next;
+	free(tp->first);
+	tp->first = second;
+	return;
+}
+
+void *worker(void *arg)
 {
 
+	thread_pool *tp = (thread_pool *)arg;
+	for (;;)
+	{
+		pthread_mutex_lock(&tp->mtx);
+		if (tp->isExit)
+		{
+			pthread_mutex_unlock(&tp->mtx);
+			break;
+		}
+		while (tp->first == NULL)
+		{
+			pthread_cond_wait(&tp->has_job, &tp->mtx);
+		}
+
+		int client_socket = -1;
+		que_list_pop(tp, &client_socket);
+
+		if (client_socket == -1)
+		{
+			// need to error handle
+			printf("minä olen täällä miten tämä on mahdollista????\n");
+		}
+		pthread_mutex_unlock(&tp->mtx);
+		handle_client(client_socket);
+		close(client_socket);
+	}
+	return NULL;
+}
+
+int main(void)
+{
 	int tcp_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (tcp_socket < 0)
 	{
@@ -507,36 +593,81 @@ int main(void)
 		return 1;
 	}
 	printf("socket binded\n");
-	if (listen(tcp_socket, 10) < 0)
+	if (listen(tcp_socket, 1000) < 0)
 	{
 		perror("listen()");
 		close(tcp_socket);
 		return 1;
 	}
 	printf("socket listening...\n");
-	int count = 1;
+
+	struct thread_pool t_pool;
+	t_pool.count = THREAD_COUNT;
+	t_pool.first = NULL;
+	t_pool.last = NULL;
+	t_pool.isExit = 0;
+	if (pthread_cond_init(&t_pool.has_job, NULL) != 0)
+	{
+		return 1;
+	}
+	if (pthread_mutex_init(&t_pool.mtx, NULL) != 0)
+		return 1;
+
+	pthread_t *p_threads = calloc(THREAD_COUNT, sizeof(pthread_t));
+	if (!p_threads)
+		return 1;
+	t_pool.threads = p_threads;
+
+	for (int i = 0; i < THREAD_COUNT; i++)
+	{
+		if (pthread_create(&t_pool.threads[i], NULL, worker, &t_pool) != 0)
+		{
+			perror("pthread_create()");
+			return 1;
+		}
+	}
+
 	while (1)
 	{
-		printf("\n↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓\n");
-		printf("count: %d\n", count);
-		count++;
-		printf("waiting for a connection...\n");
+		// printf("\n↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓\n");
+		// printf("waiting for a connection...\n");
 		int client_socket = accept(tcp_socket, NULL, NULL);
+		// printf("Jee accepted...\n");
+
 		if (client_socket < 0)
 		{
+			pthread_mutex_lock(&t_pool.mtx);
+			t_pool.isExit = 1;
+			pthread_mutex_unlock(&t_pool.mtx);
 			perror("accept()");
-			close(tcp_socket);
-			return 1;
+			break;
 		}
 
-		if (handle_client(client_socket) != 0)
-		{
-			close(client_socket);
-			close(tcp_socket);
-			return 1;
-		}
-		close(client_socket);
-		printf("client socket has closed\n");
-		printf("\n↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑\n");
+		pthread_mutex_lock(&t_pool.mtx);
+		que_list_push(&t_pool, client_socket);
+		pthread_cond_signal(&t_pool.has_job);
+		pthread_mutex_unlock(&t_pool.mtx);
+
+		// count++;
+		// printf("count: %d\n", count);
+		// printf("\n↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑\n");
 	}
+
+	for (int i = 0; i < THREAD_COUNT; i++)
+	{
+		pthread_join(t_pool.threads[i], NULL);
+	}
+	free(t_pool.threads);
+
+	tpool_work *current_node = t_pool.first;
+	while (current_node->next != NULL)
+	{
+		tpool_work *placeholder = current_node;
+		close(current_node->client_socket);
+		free(current_node);
+		current_node = placeholder->next;
+	}
+	pthread_mutex_destroy(&t_pool.mtx);
+	pthread_cond_destroy(&t_pool.has_job);
+	close(tcp_socket);
 }

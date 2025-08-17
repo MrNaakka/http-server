@@ -1,6 +1,11 @@
 {
 	"files.associations": {
 		"types.h": "c",
-		"fcntl.h": "c"
+		"fcntl.h": "c",
+		"poll.h": "c",
+		"_pthread_types.h": "c"
+	},
+	"files.watcherExclude": {
+		"**/target": true
 	}
 }
