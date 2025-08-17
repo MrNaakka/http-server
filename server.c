@@ -10,8 +10,6 @@
 #include <pthread.h>
 #include "server.h"
 
-#define THREAD_COUNT 32
-
 request_line_view get_req_line(split_string req_line)
 {
 	string null_string = {
@@ -468,26 +466,6 @@ int handle_client(int client_socket)
 		}
 	}
 }
-
-typedef struct tpool_work
-{
-	int client_socket;
-	struct tpool_work *next;
-} tpool_work;
-
-typedef struct thread_pool
-{
-	size_t count;
-	pthread_t *threads;
-
-	tpool_work *first;
-	tpool_work *last;
-
-	pthread_mutex_t mtx;
-	pthread_cond_t has_job;
-
-	int isExit;
-} thread_pool;
 
 int que_list_push(thread_pool *tp, int new_client_socket)
 {

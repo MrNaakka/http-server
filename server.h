@@ -12,6 +12,7 @@
 #define CRLF "\r\n"
 #define CRLFCRLF "\r\n\r\n"
 #define SP " "
+#define THREAD_COUNT 32
 
 // -----------------------------------------------------------------------------
 // Connection policy
@@ -47,6 +48,26 @@ typedef struct request_line
 	string version; // e.g. "HTTP/1.1"
 	int ok;					// 1 if parsed and method allowed; else 0
 } request_line_view;
+
+typedef struct tpool_work
+{
+	int client_socket;
+	struct tpool_work *next;
+} tpool_work;
+
+typedef struct thread_pool
+{
+	size_t count;
+	pthread_t *threads;
+
+	tpool_work *first;
+	tpool_work *last;
+
+	pthread_mutex_t mtx;
+	pthread_cond_t has_job;
+
+	int isExit;
+} thread_pool;
 
 // -----------------------------------------------------------------------------
 // Parsing / utilities
@@ -130,5 +151,9 @@ int send_404_respond(int client_fd);
  * Returns 0 on normal close, 1 on fatal error.
  */
 int handle_client(int client_socket);
+
+int que_list_push(thread_pool *tp, int new_client_socket);
+void que_list_pop(thread_pool *tp, int *out_fd);
+void *worker(void *arg);
 
 #endif // SERVER_H
