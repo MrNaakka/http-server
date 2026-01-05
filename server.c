@@ -376,7 +376,7 @@ int handle_client(int client_socket)
 
 		read_buf[count] = '\0';
 		split_string headers_and_requestline = split_string_by(read_buf, (size_t)count, CRLFCRLF, strlen(CRLFCRLF));
-		// print_split_string(headers_and_requestline);
+
 		if (headers_and_requestline.len < 1)
 		{
 			char *res = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -607,10 +607,8 @@ int main(void)
 
 	while (1)
 	{
-		// printf("\n↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓\n");
-		// printf("waiting for a connection...\n");
+
 		int client_socket = accept(tcp_socket, NULL, NULL);
-		// printf("Jee accepted...\n");
 
 		if (client_socket < 0)
 		{
@@ -625,10 +623,6 @@ int main(void)
 		que_list_push(&t_pool, client_socket);
 		pthread_cond_signal(&t_pool.has_job);
 		pthread_mutex_unlock(&t_pool.mtx);
-
-		// count++;
-		// printf("count: %d\n", count);
-		// printf("\n↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑\n");
 	}
 
 	for (int i = 0; i < THREAD_COUNT; i++)

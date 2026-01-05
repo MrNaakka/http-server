@@ -6,26 +6,17 @@
 #include <sys/types.h>	// ssize_t (for write_all prototype if you ever change it)
 #include <sys/socket.h> // socket types (for handle_client arg)
 
-// -----------------------------------------------------------------------------
-// Constants (macros so header doesn't define storage)
-// -----------------------------------------------------------------------------
 #define CRLF "\r\n"
 #define CRLFCRLF "\r\n\r\n"
 #define SP " "
 #define THREAD_COUNT 32
 
-// -----------------------------------------------------------------------------
-// Connection policy
-// -----------------------------------------------------------------------------
 enum Connection
 {
 	CLOSE = 0,
 	KEEP_ALIVE = 1,
 };
 
-// -----------------------------------------------------------------------------
-// String slice primitives (non-owning views into a buffer)
-// -----------------------------------------------------------------------------
 typedef struct string
 {
 	const char *data; // pointer INTO some existing buffer; not null-terminated
@@ -38,9 +29,6 @@ typedef struct split_string
 	size_t len;			 // number of slices
 } split_string;
 
-// -----------------------------------------------------------------------------
-// Request-line view
-// -----------------------------------------------------------------------------
 typedef struct request_line
 {
 	string method;	// e.g. "GET"
@@ -68,10 +56,6 @@ typedef struct thread_pool
 
 	int isExit;
 } thread_pool;
-
-// -----------------------------------------------------------------------------
-// Parsing / utilities
-// -----------------------------------------------------------------------------
 
 /**
  * Split a byte string by a byte delimiter (no allocations for substrings;
@@ -107,10 +91,6 @@ string get_Header(split_string list, string header);
  * (Keep this purely as a decision helper.)
  */
 enum Connection check_connection_header(split_string headers);
-
-// -----------------------------------------------------------------------------
-// Routing / responses
-// -----------------------------------------------------------------------------
 
 /**
  * Build a filesystem path under docroot "pages".
