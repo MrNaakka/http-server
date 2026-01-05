@@ -1,112 +1,40 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 	<head>
 		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>Error</title>
 		<style>
-			:root {
-				--bg: #fff5f5;
-				--text: #1f2937;
-				--accent: #ef4444;
-			}
-			* {
-				box-sizing: border-box;
-			}
-			html,
-			body {
-				height: 100%;
-			}
 			body {
 				margin: 0;
-				font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu,
-					Cantarell, Noto Sans, Helvetica, Arial, sans-serif;
-				background: var(--bg);
-				color: var(--text);
+				min-height: 100vh;
 				display: grid;
 				place-items: center;
-				min-height: 100svh;
+				font: 16px system-ui;
+				background: #fff5f5;
 			}
 			.card {
-				width: min(560px, 92%);
-				padding: 24px 20px;
 				background: #fff;
-				border-radius: 16px;
+				padding: 20px 24px;
+				border-radius: 12px;
 				box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
 				text-align: center;
 			}
-			.icon {
-				width: 72px;
-				height: 72px;
-				margin: 0 auto 12px;
-				border-radius: 50%;
-				display: grid;
-				place-items: center;
-				font-weight: 800;
-				font-size: 36px;
-				background: #fee2e2;
-				color: var(--accent);
-			}
-			h1 {
-				margin: 0 0 8px;
-				font-size: clamp(22px, 4vw, 28px);
-			}
-			p {
-				margin: 0 0 12px;
-				line-height: 1.5;
-			}
-			code {
-				background: #f3f4f6;
-				padding: 2px 6px;
-				border-radius: 6px;
-			}
-			a.button {
+			a {
 				display: inline-block;
-				margin-top: 8px;
+				margin: 10px 6px;
 				padding: 10px 14px;
 				border-radius: 10px;
-				background: var(--accent);
+				background: #ef4444;
 				color: #fff;
 				text-decoration: none;
-				font-weight: 600;
-			}
-			.links {
-				display: flex;
-				gap: 10px;
-				justify-content: center;
-				flex-wrap: wrap;
 			}
 		</style>
 	</head>
 	<body>
-		<main class="card" role="alert" aria-live="assertive">
-			<div class="icon" aria-hidden="true">!</div>
+		<div class="card">
 			<h1>Something went wrong</h1>
-			<p>Sorry, we couldn't complete your request. Please try again.</p>
-			<p id="details" hidden></p>
-			<div class="links">
-				<a
-					class="button"
-					href="#"
-					onclick="history.length>1 ? history.back() : location.assign('/')"
-					>Go back</a
-				>
-				<a class="button" href="/">Home</a>
-			</div>
-		</main>
-
-		<!-- <script>
-      // Optional: show details from URL like ?message=Timeout&code=504
-      (function(){
-        const p = new URLSearchParams(location.search);
-        const msg = p.get('message') || p.get('error');
-        const code = p.get('code');
-        if(msg || code){
-          const el = document.getElementById('details');
-          el.hidden = false;
-          el.textContent = [code ? `Error ${code}:` : null, msg].filter(Boolean).join(' ');
-        }
-      })();
-    </script> -->
+			<a href="javascript:history.back()">Go back</a>
+			<a href="/">Home</a>
+		</div>
 	</body>
 </html>
