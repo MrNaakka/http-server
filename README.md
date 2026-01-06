@@ -12,5 +12,3 @@ A tiny HTTP/1.1 server written in C using POSIX sockets + pthreads.
     -   `/something` -> `pages/something/index.html`
 -   Returns a custom 404 page from `pages/error.html` (or a fallback 404 if missing)
 -   Supports `Connection: keep-alive` (otherwise closes the connection)
-
-## Folder structure (expected)
